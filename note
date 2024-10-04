@@ -1,0 +1,89 @@
+Install
+    $ wget https://github.com/restic/restic/releases/download/v0.17.1/restic_0.17.1_linux_amd64.bz2
+    $ bunzip2 restic_0.17.1_linux_amd64.bz2
+    $ chmod +x restic_0.17.1_linux_amd64
+    $ sudo cp restic_0.17.1_linux_amd64 /usr/local/bin
+
+Bash completion
+    $ ./restic generate --bash-completion restic.bash
+    $ source restic.bash
+
+Backup and restore block device (without complete path which is by default)
+    $ restic init -r ~/repo/
+    $ write pw to /home/ubuntu/pw.txt
+    $ export RESTIC_PASSWORD_FILE=/home/ubuntu/pw.txt
+    $ sudo dd if=/dev/sda of=block_device.img bs=4M
+    $ restic -r /home/ubuntu/repo backup /home/ubuntu/block_device.img
+    $ restic -r /home/ubuntu/repo snapshots
+        ID        Time                 Host        Tags        Paths
+        ------------------------------------------------------------------------------------
+        b504c81b  2024-07-20 13:42:56  vm                      /home/ubuntu/block_device.img
+        ------------------------------------------------------------------------------------
+    $ restic -r /home/ubuntu/repo find block_device.img
+        repository d5737420 opened (version 2, compression level auto)
+        [0:00] 100.00%  1 / 1 index files loaded
+        Found matching entries in snapshot 68caf3c8 from 2024-07-20 14:15:10
+        /home/ubuntu/block_device.img
+    $ restic -r /home/ubuntu/repo restore 68caf3c8:/home/ubuntu/ --include block_device.img --target restore/ --verbose=2
+        repository d5737420 opened (version 2, compression level auto)
+
+        restoring <Snapshot 68caf3c8 of [/home/ubuntu/block_device.img] at 2024-07-20 14:15:10.191806768 +0000 UTC by ubuntu@vm> to restore/
+        Summary: Restored 1 files/dirs (3.000 GiB) in 0:07
+    $ ls restore/
+        block_device.img
+
+Backup and restore block device (without creating temp image file) (backup sda and restore to sdb)
+    $ lsblk
+        NAME    MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS
+        loop0     7:0    0  63.5M  1 loop /snap/core20/2015
+        loop1     7:1    0 111.9M  1 loop /snap/lxd/24322
+        loop2     7:2    0  40.8M  1 loop /snap/snapd/20092
+        sda       8:0    0     5G  0 disk 
+        sdb       8:16   0     5G  0 disk 
+        vda     252:0    0    20G  0 disk 
+        ├─vda1  252:1    0  19.9G  0 part /
+        ├─vda14 252:14   0     4M  0 part 
+        └─vda15 252:15   0   106M  0 part /boot/efi
+        vdb     252:16   0     1M  0 disk
+    $ sudo dd if=/dev/sda bs=4M | restic -r repo --verbose=2 backup --stdin --stdin-filename block_device.img
+    $ restic snapshots 
+        repository 1f6f23e5 opened (version 2, compression level auto)
+        ID        Time                 Host        Tags        Paths
+        ------------------------------------------------------------------------
+        ec161fcf  2024-07-22 10:03:09  vm                      /block_device.img
+        109312cd  2024-07-22 10:57:37  vm                      /block_device.img
+        abd30ea0  2024-07-22 10:58:07  vm                      /block_device.img
+        ------------------------------------------------------------------------
+        3 snapshots
+    $ restic -r repo/ --verbose=2 dump abd30ea0 block_device.img | sudo dd of=/dev/sdb bs=4M
+    $ sudo cmp -l /dev/sda /dev/sdb
+        no difference
+
+Backup and restore block device with minio (backup sda and restore to sdb)
+    $ lsblk
+        NAME    MAJ:MIN RM   SIZE RO TYPE MOUNTPOINTS
+        loop0     7:0    0  63.5M  1 loop /snap/core20/2015
+        loop1     7:1    0 111.9M  1 loop /snap/lxd/24322
+        loop2     7:2    0  40.8M  1 loop /snap/snapd/20092
+        sda       8:0    0     5G  0 disk 
+        sdb       8:16   0     5G  0 disk 
+        vda     252:0    0    20G  0 disk 
+        ├─vda1  252:1    0  19.9G  0 part /
+        ├─vda14 252:14   0     4M  0 part 
+        └─vda15 252:15   0   106M  0 part /boot/efi
+        vdb     252:16   0     1M  0 disk
+    $ export AWS_ACCESS_KEY_ID=minioadmin
+    $ export AWS_SECRET_ACCESS_KEY=minioadmin
+    $ export RESTIC_REPOSITORY=s3:http://192.188.0.54:9000/restic-testing
+    $ export RESTIC_PASSWORD=keen704
+    $ restic init
+    $ sudo dd if=/dev/sda bs=4M | restic --verbose=2 backup --stdin --stdin-filename block_device.img
+    $ restic snapshots
+        ID        Time                 Host        Tags        Paths
+        ------------------------------------------------------------------------
+        91837969  2024-07-22 13:34:09  vm                      /block_device.img
+        ------------------------------------------------------------------------
+        1 snapshots
+    $ restic --verbose=2 dump 91837969 block_device.img | sudo dd of=/dev/sdb bs=4M
+        $ sudo cmp -l /dev/sda /dev/sdb
+            no difference
