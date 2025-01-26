@@ -8,6 +8,6 @@ echo "Build docker image webberhuang/restic:latest"
 docker build \
   --rm \
   --pull \
-  --file docker/Dockerfile \
+  --file custom/Dockerfile \
   --tag webberhuang/restic:latest \
   .

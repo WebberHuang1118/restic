@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: restic-creds
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: "minioadmin"
+  AWS_SECRET_ACCESS_KEY: "minioadmin"
+  RESTIC_REPOSITORY: "s3:http://192.188.0.50:9000/restic-testing"
+  RESTIC_PASSWORD: "keen704"

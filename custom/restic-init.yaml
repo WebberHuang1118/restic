@@ -1,0 +1,21 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: restic-init
+spec:
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: init
+        image: webberhuang/restic:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+          - secretRef:
+              name: restic-creds
+        command: ["/bin/bash"]
+        args:
+          - "-c"
+          - >
+            restic init
