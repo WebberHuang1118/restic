@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: restic-backup-block
+spec:
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: backup
+        image: webberhuang/restic:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+          - secretRef:
+              name: restic-creds
+        command: ["/bin/bash"]
+        args:
+          - "-c"
+          - |
+            dd if=/dev/vol1 bs=4M | restic --verbose=2 backup --stdin --stdin-filename block-device.img;
+        volumeDevices:
+          - name: vol1
+            devicePath: /dev/vol1
+        securityContext:
+          privileged: true
+      volumes:
+      - name: vol1
+        persistentVolumeClaim:
+          claimName: vol1

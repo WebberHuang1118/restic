@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: restic-restore-block
+spec:
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: restore
+        image: webberhuang/restic:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+          - secretRef:
+              name: restic-creds
+        command: ["/bin/bash"]
+        args:
+          - "-c"
+          - |
+            restic --verbose=2 dump latest block-device.img | dd of=/dev/vol2 bs=4M;
+        volumeDevices:
+          - name: vol2
+            devicePath: /dev/vol2
+        securityContext:
+          privileged: true
+      volumes:
+      - name: vol2
+        persistentVolumeClaim:
+          claimName: vol2
