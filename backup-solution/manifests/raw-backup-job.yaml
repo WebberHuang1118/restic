@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: raw-backup-job
+  namespace: default
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: raw-backup
+        image: ubuntu:latest
+        envFrom:
+          - secretRef:
+              name: restic-env
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+            echo "Installing required packages..."
+            apt update && apt install -y restic awscli util-linux coreutils dd lsblk
+            DEVICE="/dev/block-device"
+            if [ ! -b "$DEVICE" ]; then
+              echo "Block device $DEVICE not found."
+              exit 1
+            fi
+            echo "Performing raw backup of $DEVICE..."
+            dd if=$DEVICE bs=4M status=progress | restic backup --stdin --stdin-filename raw-backup.img
+            echo "Raw backup completed."
+        volumeDevices:
+          - name: pvc-storage
+            devicePath: /dev/block-device
+      volumes:
+        - name: pvc-storage
+          persistentVolumeClaim:
+            claimName: my-block-pvc

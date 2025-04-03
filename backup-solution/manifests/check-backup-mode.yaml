@@ -1,0 +1,50 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: check-backup-mode
+  namespace: default
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: check-backup-mode
+        image: ubuntu:latest
+        envFrom:
+          - secretRef:
+              name: restic-env
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+            echo "Installing required packages..."
+            apt update && apt install -y parted lsblk
+            # The block-mode PVC is provided as a raw block device via volumeDevices.
+            DEVICE="/dev/block-device"
+            if [ ! -b "$DEVICE" ]; then
+              echo "Block device $DEVICE not found."
+              exit 1
+            fi
+            echo "Detected block device: $DEVICE"
+            # Check for a partition table.
+            PARTITION_TABLE=$(parted -s $DEVICE print 2>/dev/null | grep "Partition Table:" | awk '{print $3}')
+            if [ -n "$PARTITION_TABLE" ]; then
+              echo "raw"
+            else
+              # No partition table; check filesystem type.
+              FILESYSTEM=$(lsblk -no FSTYPE $DEVICE | head -n 1)
+              echo "Detected filesystem: $FILESYSTEM"
+              if [ "$FILESYSTEM" = "ext4" ] || [ "$FILESYSTEM" = "xfs" ] || [ "$FILESYSTEM" = "btrfs" ]; then
+                echo "file"
+              else
+                echo "raw"
+              fi
+            fi
+        volumeDevices:
+          - name: pvc-storage
+            devicePath: /dev/block-device
+      volumes:
+        - name: pvc-storage
+          persistentVolumeClaim:
+            claimName: my-block-pvc

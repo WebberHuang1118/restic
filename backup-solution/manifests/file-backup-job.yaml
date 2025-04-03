@@ -1,0 +1,57 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: file-backup-job
+  namespace: default
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: file-backup
+        image: ubuntu:latest
+        envFrom:
+          - secretRef:
+              name: restic-env
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+            echo "Installing required packages..."
+            apt update && apt install -y restic awscli util-linux coreutils findmnt dd
+
+            DEVICE="/dev/block-device"
+            if [ ! -b "$DEVICE" ]; then
+              echo "Block device $DEVICE not found."
+              exit 1
+            fi
+            echo "Detected block device: $DEVICE"
+            MOUNT_POINT="/mnt/backup"
+            
+            # Check if the device is already mounted.
+            MOUNTED=$(findmnt -n -o TARGET $DEVICE || echo "")
+            if [ -z "$MOUNTED" ]; then
+              echo "Device is not mounted. Attempting to mount $DEVICE at $MOUNT_POINT..."
+              mkdir -p $MOUNT_POINT
+              if mount $DEVICE $MOUNT_POINT; then
+                echo "Mount succeeded. Performing file-level backup on $MOUNT_POINT..."
+                restic backup $MOUNT_POINT
+                echo "Unmounting $MOUNT_POINT..."
+                umount $MOUNT_POINT
+              else
+                echo "Failed to mount $DEVICE at $MOUNT_POINT. Falling back to raw backup."
+                dd if=$DEVICE bs=4M status=progress | restic backup --stdin --stdin-filename raw-backup-fallback.img
+              fi
+            else
+              echo "Device is already mounted at $MOUNTED. Performing file-level backup..."
+              restic backup $MOUNTED
+            fi
+            echo "Backup completed."
+        volumeDevices:
+          - name: pvc-storage
+            devicePath: /dev/block-device
+      volumes:
+        - name: pvc-storage
+          persistentVolumeClaim:
+            claimName: my-block-pvc
