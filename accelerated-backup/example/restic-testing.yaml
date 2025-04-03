@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: restic-testing
+  namespace: backup
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: testing
+        image: webberhuang/restic-accelerated:latest
+        imagePullPolicy: IfNotPresent
+        envFrom:
+          - secretRef:
+              name: minio-credentials
+        command: ["sleep"]
+        args:
+          - "3600"
+        volumeDevices:
+          - name: vol1
+            devicePath: /dev/vol1
+          - name: vol2
+            devicePath: /dev/vol2
+        securityContext:
+          privileged: true
+      volumes:
+      - name: vol1
+        persistentVolumeClaim:
+          claimName: vol1
+      - name: vol2
+        persistentVolumeClaim:
+          claimName: vol2

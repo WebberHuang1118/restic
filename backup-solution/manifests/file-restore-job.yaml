@@ -1,0 +1,60 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: file-restore-job
+  namespace: default
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+      - name: format-device
+        image: ubuntu:latest
+        envFrom:
+          - secretRef:
+              name: restic-env
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+            echo "Init container: Installing formatting tools..."
+            apt update && apt install -y util-linux e2fsprogs
+            DEVICE="/dev/block-device"
+            echo "Formatting $DEVICE as ext4 (unconditionally, since PVC is empty)..."
+            mkfs.ext4 -F $DEVICE
+            echo "Formatting complete."
+        volumeDevices:
+          - name: pvc-storage
+            devicePath: /dev/block-device
+
+      containers:
+      - name: file-restore
+        image: ubuntu:latest
+        envFrom:
+          - secretRef:
+              name: restic-env
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+            echo "Main container: Installing required packages..."
+            apt update && apt install -y restic awscli util-linux coreutils findmnt
+            DEVICE="/dev/block-device"
+            MOUNT_POINT="/mnt/restore"
+            echo "Creating mount point and mounting $DEVICE at $MOUNT_POINT..."
+            mkdir -p $MOUNT_POINT
+            mount $DEVICE $MOUNT_POINT
+            echo "Restoring file-level backup to $MOUNT_POINT..."
+            restic restore latest --target $MOUNT_POINT
+            echo "File-level restore completed."
+            echo "Unmounting $MOUNT_POINT..."
+            umount $MOUNT_POINT
+        volumeDevices:
+          - name: pvc-storage
+            devicePath: /dev/block-device
+      volumes:
+        - name: pvc-storage
+          persistentVolumeClaim:
+            claimName: my-block-pvc

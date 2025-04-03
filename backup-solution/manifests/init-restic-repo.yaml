@@ -1,0 +1,29 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-restic-repo
+  namespace: default
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: init-restic
+        image: ubuntu:latest
+        envFrom:
+          - secretRef:
+              name: restic-env
+        command:
+          - /bin/bash
+          - -c
+          - |
+            set -e
+            echo "Installing required packages..."
+            apt update && apt install -y restic awscli
+            echo "Checking if the Restic repository is already initialized..."
+            if restic snapshots > /dev/null 2>&1; then
+              echo "Restic repository is already initialized."
+            else
+              echo "Repository not found. Initializing repository..."
+              restic init
+              echo "Repository initialization completed."

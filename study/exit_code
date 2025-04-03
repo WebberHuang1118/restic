@@ -1,0 +1,43 @@
+Describe in cmd/restic/cmd_<subcmd>.go:
+  for example backup cmd:
+    "
+    EXIT STATUS
+    ===========
+
+    Exit status is 0 if the command was successful.
+    Exit status is 1 if there was a fatal error (no snapshot created).
+    Exit status is 3 if some source data could not be read (incomplete snapshot created).
+    Exit status is 10 if the repository does not exist.
+    Exit status is 11 if the repository is already locked.
+    Exit status is 12 if the password is incorrect.
+    `
+    "
+    https://github.com/restic/restic/blob/bdaa691b7bcbecb78c8222066499b68c0d0731c7/cmd/restic/cmd_backup.go#L40-L49
+
+  main.go control the final exit code
+    "
+    var exitCode int
+    switch {
+    case err == nil:
+      exitCode = 0
+    case err == ErrInvalidSourceData:
+      exitCode = 3
+    case errors.Is(err, ErrNoRepository):
+      exitCode = 10
+    case restic.IsAlreadyLocked(err):
+      exitCode = 11
+    case errors.Is(err, repository.ErrNoKeyFound):
+      exitCode = 12
+    case errors.Is(err, context.Canceled):
+      exitCode = 130
+    default:
+      exitCode = 1
+    }
+
+    if exitCode != 0 {
+      printExitError(exitCode, exitMessage)
+    }
+    Exit(exitCode)
+    "
+    https://github.com/restic/restic/blob/bdaa691b7bcbecb78c8222066499b68c0d0731c7/cmd/restic/main.go#L198-L219
+

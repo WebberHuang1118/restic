@@ -5,4 +5,4 @@
 
 Testing restic
 $ kubectl apply -f restic-testing.yaml
-and entor the job's pod to check restic command
+and enter the job's pod to check restic command
