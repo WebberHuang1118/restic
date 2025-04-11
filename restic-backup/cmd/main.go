@@ -45,19 +45,25 @@ func main() {
 
 	// Run repository check job.
 	log.Println("🔧 Applying repository check job manifest...")
+	// Generate a job suffix for uniqueness.
+	jobSuffix, err := k8s.GenerateJobSuffix()
+	if err != nil {
+		log.Fatalf("❌ Failed to generate job suffix: %v", err)
+	}
+	// For the repository check, the manifest template uses tokens {{NAMESPACE}} and {{NAME}}.
+	// We pass the default job name as "restic-check-"+jobSuffix. All other tokens (e.g., AWS secrets)
+	// are provided via the extraReplacements map.
 	checkRepls := map[string]string{
 		"AWS_ACCESS_KEY_ID":     *awsID,
 		"AWS_SECRET_ACCESS_KEY": *awsSecret,
 		"RESTIC_REPOSITORY":     *repository,
 		"RESTIC_PASSWORD":       *password,
-		"NAMESPACE":             *namespace,
 	}
-	checkManifest := k8s.ReplacePlaceholders(manifests.ResticCheckJob, checkRepls)
-	if err := k8s.ApplyManifest(checkManifest, *namespace, "", true); err != nil {
+	if err := k8s.ApplyManifest(manifests.ResticCheckJob, *namespace, "restic-check-"+jobSuffix, checkRepls); err != nil {
 		log.Fatalf("❌ Failed to apply repository check job manifest: %v", err)
 	}
 	log.Println("⌛ Waiting for repository check job to complete...")
-	checkErr := k8s.WaitForJob("restic-check", *namespace, 10*time.Second)
+	checkErr := k8s.WaitForJob("restic-check-"+jobSuffix, *namespace, 10*time.Second)
 	repoInitialized := (checkErr == nil)
 
 	switch *mode {

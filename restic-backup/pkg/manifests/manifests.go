@@ -1,6 +1,6 @@
 package manifests
 
-// MinioCredentials (optional). Secrets are passed via job commands.
+// MinioCredentials (optional). This secret uses fixed naming.
 const MinioCredentials = `
 apiVersion: v1
 kind: Secret
@@ -20,7 +20,7 @@ const ResticCheckJob = `
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: restic-check
+  name: {{NAME}}
   namespace: {{NAMESPACE}}
 spec:
   backoffLimit: 0
@@ -42,7 +42,7 @@ const ResticInitJob = `
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: restic-init
+  name: {{NAME}}
   namespace: {{NAMESPACE}}
 spec:
   backoffLimit: 0
@@ -64,7 +64,7 @@ const VolumeSnapshot = `
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
 metadata:
-  name: {{VOLUME_SNAPSHOT_NAME}}
+  name: {{NAME}}
   namespace: {{NAMESPACE}}
 spec:
   volumeSnapshotClassName: {{VOLUME_SNAPSHOT_CLASSNAME}}
@@ -77,7 +77,7 @@ const PVCClone = `
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{NEW_PVC_NAME}}
+  name: {{NAME}}
   namespace: {{NAMESPACE}}
 spec:
   accessModes:
@@ -98,7 +98,7 @@ const BackupJob = `
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: block-backup-job
+  name: {{NAME}}
   namespace: {{NAMESPACE}}
 spec:
   backoffLimit: 0
@@ -112,14 +112,14 @@ spec:
         imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
         args:
-          - export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}} && export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}} && export RESTIC_REPOSITORY={{RESTIC_REPOSITORY}} && export RESTIC_PASSWORD={{RESTIC_PASSWORD}} && /usr/local/bin/accelerated_io -device /dev/{{PVC_NAME}} -mode=read | restic -q backup --stdin --stdin-filename {{PV_NAME}}.img
+          - export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}} && export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}} && export RESTIC_REPOSITORY={{RESTIC_REPOSITORY}} && export RESTIC_PASSWORD={{RESTIC_PASSWORD}} && /usr/local/bin/accelerated_io -device /dev/{{PVC_NAME}} -mode=read | restic -q backup --stdin --stdin-filename {{PV_NAME}}
         volumeDevices:
         - name: vol1
           devicePath: /dev/{{PVC_NAME}}
       volumes:
       - name: vol1
         persistentVolumeClaim:
-          claimName: "{{PVC_NAME}}"
+          claimName: {{PVC_NAME}}
 `
 
 // RestoreJob defines the restore job.
@@ -127,7 +127,7 @@ const RestoreJob = `
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: block-restore-job
+  name: {{NAME}}
   namespace: {{NAMESPACE}}
 spec:
   backoffLimit: 0
@@ -141,12 +141,12 @@ spec:
         imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
         args:
-          - export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}} && export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}} && export RESTIC_REPOSITORY={{RESTIC_REPOSITORY}} && export RESTIC_PASSWORD={{RESTIC_PASSWORD}} && restic --verbose=2 dump latest {{PV_NAME}}.img | /usr/local/bin/accelerated_io -device /dev/{{PVC_NAME}} -mode=write
+          - export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}} && export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}} && export RESTIC_REPOSITORY={{RESTIC_REPOSITORY}} && export RESTIC_PASSWORD={{RESTIC_PASSWORD}} && restic --verbose=2 dump latest {{PV_NAME}} | /usr/local/bin/accelerated_io -device /dev/{{PVC_NAME}} -mode=write
         volumeDevices:
         - name: vol2
           devicePath: /dev/{{PVC_NAME}}
       volumes:
       - name: vol2
         persistentVolumeClaim:
-          claimName: "{{PVC_NAME}}"
+          claimName: {{PVC_NAME}}
 `

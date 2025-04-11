@@ -12,7 +12,7 @@ FROM debian:bullseye
 
 # Use build arguments to support multi-architecture builds
 ARG TARGETARCH=amd64
-ARG RESTIC_VERSION=0.15.0
+ARG RESTIC_VERSION=0.17.3
 ENV TARGETARCH=${TARGETARCH}
 
 # Install necessary dependencies

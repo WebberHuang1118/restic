@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -40,6 +42,7 @@ var (
 	}
 )
 
+// InitK8sClients initializes both typed and dynamic Kubernetes clients.
 func InitK8sClients(kubeconfig string) error {
 	var config *rest.Config
 	var err error
@@ -67,6 +70,8 @@ func InitK8sClients(kubeconfig string) error {
 	return nil
 }
 
+// ReplacePlaceholders is a helper for substituting placeholders in a string.
+// This remains available for custom replacements outside of ApplyManifest.
 func ReplacePlaceholders(manifest string, replacements map[string]string) string {
 	for key, value := range replacements {
 		placeholder := fmt.Sprintf("{{%s}}", key)
@@ -75,6 +80,7 @@ func ReplacePlaceholders(manifest string, replacements map[string]string) string
 	return manifest
 }
 
+// CleanupResources deletes temporary resources such as PVC clones and VolumeSnapshots.
 func CleanupResources(namespace, vsName, pvcCloneName string, vsCreated, pvcCloneCreated bool) {
 	if pvcCloneCreated {
 		logutil.Info(fmt.Sprintf("Deleting PVC clone %s...", pvcCloneName))
@@ -94,11 +100,25 @@ func CleanupResources(namespace, vsName, pvcCloneName string, vsCreated, pvcClon
 	}
 }
 
-func ApplyManifest(manifest, namespace, pvcName string, substitute bool) error {
-	if substitute {
-		manifest = strings.ReplaceAll(manifest, "{{PVC_NAME}}", pvcName)
-		manifest = strings.ReplaceAll(manifest, "{{NAMESPACE}}", namespace)
+// ApplyManifest applies the given manifest to the cluster.
+// It always replaces the default placeholders for {{NAMESPACE}} and {{NAME}} (the object's name).
+// Any additional substitutions are provided via extraReplacements.
+// (For example, if your PVC name is needed in the manifest, supply it in extraReplacements with key "PVC_NAME".)
+func ApplyManifest(manifest, namespace, defaultName string, extraReplacements map[string]string) error {
+	// Replace the default tokens.
+	manifest = strings.ReplaceAll(manifest, "{{NAMESPACE}}", namespace)
+	manifest = strings.ReplaceAll(manifest, "{{NAME}}", defaultName)
+
+	// Substitute additional replacements.
+	for key, value := range extraReplacements {
+		// Skip keys that belong to defaults.
+		if key == "NAMESPACE" || key == "NAME" {
+			continue
+		}
+		placeholder := fmt.Sprintf("{{%s}}", key)
+		manifest = strings.ReplaceAll(manifest, placeholder, value)
 	}
+
 	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader([]byte(manifest)), 4096)
 	for {
 		var obj unstructured.Unstructured
@@ -112,6 +132,7 @@ func ApplyManifest(manifest, namespace, pvcName string, substitute bool) error {
 		if len(obj.Object) == 0 {
 			continue
 		}
+		// If the object did not get a namespace, set it.
 		if obj.GetNamespace() == "" && namespace != "" {
 			obj.SetNamespace(namespace)
 		}
@@ -146,6 +167,7 @@ func ApplyManifest(manifest, namespace, pvcName string, substitute bool) error {
 	return nil
 }
 
+// WaitForJob waits until the specified Job succeeds, or until a timeout occurs.
 func WaitForJob(jobName, namespace string, timeout time.Duration) error {
 	msg := fmt.Sprintf("Waiting for job %s in namespace %s...", jobName, namespace)
 	logutil.Info(msg)
@@ -166,6 +188,7 @@ func WaitForJob(jobName, namespace string, timeout time.Duration) error {
 	}
 }
 
+// WaitForVolumeSnapshot waits until the VolumeSnapshot is ready to use.
 func WaitForVolumeSnapshot(vsName, namespace string, timeout time.Duration) error {
 	spinner := []string{"⌛→", "⌛↑", "⌛←", "⌛↓"}
 	msg := fmt.Sprintf("Waiting for VolumeSnapshot %s in namespace %s...", vsName, namespace)
@@ -191,6 +214,7 @@ func WaitForVolumeSnapshot(vsName, namespace string, timeout time.Duration) erro
 	}
 }
 
+// WaitForPVCBound waits until the specified PVC is in Bound state.
 func WaitForPVCBound(pvcName, namespace string, timeout time.Duration) error {
 	spinner := []string{"⌛→", "⌛↑", "⌛←", "⌛↓"}
 	msg := fmt.Sprintf("Waiting for PVC %s to become Bound in namespace %s...", pvcName, namespace)
@@ -214,6 +238,7 @@ func WaitForPVCBound(pvcName, namespace string, timeout time.Duration) error {
 	}
 }
 
+// GetPVCStorageClass retrieves the storage class of the PVC.
 func GetPVCStorageClass(pvcName, namespace string) (string, error) {
 	pvc, err := Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(context.Background(), pvcName, metav1.GetOptions{})
 	if err != nil {
@@ -225,6 +250,7 @@ func GetPVCStorageClass(pvcName, namespace string) (string, error) {
 	return *pvc.Spec.StorageClassName, nil
 }
 
+// GetPVCStorageSize retrieves the storage request size of the PVC.
 func GetPVCStorageSize(pvcName, namespace string) (string, error) {
 	pvc, err := Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(context.Background(), pvcName, metav1.GetOptions{})
 	if err != nil {
@@ -237,6 +263,7 @@ func GetPVCStorageSize(pvcName, namespace string) (string, error) {
 	return storage.String(), nil
 }
 
+// GetPVCVolumeMode retrieves the volume mode of the PVC.
 func GetPVCVolumeMode(pvcName, namespace string) (string, error) {
 	pvc, err := Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(context.Background(), pvcName, metav1.GetOptions{})
 	if err != nil {
@@ -248,6 +275,7 @@ func GetPVCVolumeMode(pvcName, namespace string) (string, error) {
 	return string(*pvc.Spec.VolumeMode), nil
 }
 
+// GetPVCVolumeName retrieves the volume name (PV) bound to the PVC.
 func GetPVCVolumeName(pvcName, namespace string) (string, error) {
 	pvc, err := Clientset.CoreV1().PersistentVolumeClaims(namespace).Get(context.Background(), pvcName, metav1.GetOptions{})
 	if err != nil {
@@ -259,6 +287,7 @@ func GetPVCVolumeName(pvcName, namespace string) (string, error) {
 	return pvc.Spec.VolumeName, nil
 }
 
+// StreamJobProgressPercentage streams logs from a job's container and parses progress metrics.
 func StreamJobProgressPercentage(jobName, namespace, container, progressLabel string) error {
 	var podName string
 	const retryCount = 10
@@ -309,7 +338,6 @@ func StreamJobProgressPercentage(jobName, namespace, container, progressLabel st
 			var current, total int
 			var percent float64
 			if n, err := fmt.Sscanf(line, format, &current, &total, &percent); err == nil && n == 3 {
-				// Use logutil to print progress in blue.
 				log.Printf("progress: %.2f%%", percent)
 			}
 		}
@@ -318,4 +346,13 @@ func StreamJobProgressPercentage(jobName, namespace, container, progressLabel st
 		return fmt.Errorf("error scanning log stream: %w", err)
 	}
 	return nil
+}
+
+// GenerateJobSuffix generates a random hexadecimal string to use as a unique job suffix.
+func GenerateJobSuffix() (string, error) {
+	bytes := make([]byte, 4) // Adjust the length as needed.
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
 }
