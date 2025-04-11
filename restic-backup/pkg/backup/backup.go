@@ -16,15 +16,15 @@ func RunBackup(namespace, pvcName, vsc, awsID, awsSecret, repository, password s
 	pvcCloneCreated := false
 
 	// Step 1: Create VolumeSnapshot.
+	// The VolumeSnapshot manifest now uses:
+	//   name: {{NAME}}
+	//   namespace: {{NAMESPACE}}
+	// And expects the extra tokens "PVC_NAME" (the source PVC) and "VOLUME_SNAPSHOT_CLASSNAME" (the snapshot class).
 	vsRepls := map[string]string{
 		"PVC_NAME":                  pvcName,
-		"VOLUME_SNAPSHOT_NAME":      vsName,
-		"NAMESPACE":                 namespace,
 		"VOLUME_SNAPSHOT_CLASSNAME": vsc,
 	}
-	vsManifest := k8s.ReplacePlaceholders(manifests.VolumeSnapshot, vsRepls)
-	log.Printf("🔧 Creating VolumeSnapshot %s for PVC %s...", vsName, pvcName)
-	if err := k8s.ApplyManifest(vsManifest, namespace, "", false); err != nil {
+	if err := k8s.ApplyManifest(manifests.VolumeSnapshot, namespace, vsName, vsRepls); err != nil {
 		k8s.CleanupResources(namespace, vsName, clonePVCName, vsCreated, pvcCloneCreated)
 		log.Fatalf("❌ Failed to create VolumeSnapshot: %v", err)
 	}
@@ -37,11 +37,10 @@ func RunBackup(namespace, pvcName, vsc, awsID, awsSecret, repository, password s
 	}
 
 	// Step 2: Create clone PVC.
-	cloneRepls := map[string]string{
-		"NEW_PVC_NAME":         clonePVCName,
-		"VOLUME_SNAPSHOT_NAME": vsName,
-		"NAMESPACE":            namespace,
-	}
+	// The PVCClone manifest uses:
+	//   name: {{NAME}}
+	//   namespace: {{NAMESPACE}}
+	// It expects extra tokens "VOLUME_MODE", "STORAGE_CLASS", "STORAGE_SIZE", and "VOLUME_SNAPSHOT_NAME".
 	sc, err := k8s.GetPVCStorageClass(pvcName, namespace)
 	if err != nil {
 		k8s.CleanupResources(namespace, vsName, clonePVCName, vsCreated, pvcCloneCreated)
@@ -57,12 +56,13 @@ func RunBackup(namespace, pvcName, vsc, awsID, awsSecret, repository, password s
 		k8s.CleanupResources(namespace, vsName, clonePVCName, vsCreated, pvcCloneCreated)
 		log.Fatalf("❌ Failed to get volume mode: %v", err)
 	}
-	cloneRepls["STORAGE_CLASS"] = sc
-	cloneRepls["STORAGE_SIZE"] = ssize
-	cloneRepls["VOLUME_MODE"] = vmode
-	pvcCloneManifest := k8s.ReplacePlaceholders(manifests.PVCClone, cloneRepls)
-	log.Printf("🔧 Creating PVC clone %s from VolumeSnapshot %s...", clonePVCName, vsName)
-	if err := k8s.ApplyManifest(pvcCloneManifest, namespace, "", false); err != nil {
+	cloneRepls := map[string]string{
+		"VOLUME_MODE":          vmode,
+		"STORAGE_CLASS":        sc,
+		"STORAGE_SIZE":         ssize,
+		"VOLUME_SNAPSHOT_NAME": vsName, // Used for dataSource.name in the PVC
+	}
+	if err := k8s.ApplyManifest(manifests.PVCClone, namespace, clonePVCName, cloneRepls); err != nil {
 		k8s.CleanupResources(namespace, vsName, clonePVCName, vsCreated, pvcCloneCreated)
 		log.Fatalf("❌ Failed to create PVC clone: %v", err)
 	}
@@ -84,19 +84,23 @@ func RunBackup(namespace, pvcName, vsc, awsID, awsSecret, repository, password s
 	// Step 4: Initialize repository if needed.
 	if !repoInitialized {
 		log.Println("🔧 Restic repository not initialized. Applying init job...")
+		jobSuffix, err := k8s.GenerateJobSuffix()
+		if err != nil {
+			log.Fatalf("❌ Failed to generate job suffix for init job: %v", err)
+		}
+		// For the init job, the manifest template uses tokens {{NAMESPACE}} and {{NAME}}.
+		// We pass the default name as "restic-init-" + jobSuffix.
 		initRepls := map[string]string{
 			"AWS_ACCESS_KEY_ID":     awsID,
 			"AWS_SECRET_ACCESS_KEY": awsSecret,
 			"RESTIC_REPOSITORY":     repository,
 			"RESTIC_PASSWORD":       password,
-			"NAMESPACE":             namespace,
 		}
-		initManifest := k8s.ReplacePlaceholders(manifests.ResticInitJob, initRepls)
-		if err := k8s.ApplyManifest(initManifest, namespace, "", true); err != nil {
+		if err := k8s.ApplyManifest(manifests.ResticInitJob, namespace, "restic-init-"+jobSuffix, initRepls); err != nil {
 			k8s.CleanupResources(namespace, vsName, clonePVCName, vsCreated, pvcCloneCreated)
 			log.Fatalf("❌ Failed to apply init job: %v", err)
 		}
-		if err := k8s.WaitForJob("restic-init", namespace, 30*time.Second); err != nil {
+		if err := k8s.WaitForJob("restic-init-"+jobSuffix, namespace, 30*time.Second); err != nil {
 			k8s.CleanupResources(namespace, vsName, clonePVCName, vsCreated, pvcCloneCreated)
 			log.Fatalf("❌ Init job did not complete: %v", err)
 		}
@@ -105,31 +109,32 @@ func RunBackup(namespace, pvcName, vsc, awsID, awsSecret, repository, password s
 	}
 
 	// Step 5: Run backup job.
+	jobSuffix, err := k8s.GenerateJobSuffix()
+	if err != nil {
+		log.Fatalf("❌ Failed to generate job suffix for backup job: %v", err)
+	}
 	backupRepls := map[string]string{
-		"PVC_NAME":              clonePVCName,
-		"NAMESPACE":             namespace,
-		"PV_NAME":               pvName,
 		"AWS_ACCESS_KEY_ID":     awsID,
 		"AWS_SECRET_ACCESS_KEY": awsSecret,
 		"RESTIC_REPOSITORY":     repository,
 		"RESTIC_PASSWORD":       password,
+		"PVC_NAME":              clonePVCName, // If the accelerated_io command expects a PVC name
+		"PV_NAME":               pvName,
 	}
-	backupManifest := k8s.ReplacePlaceholders(manifests.BackupJob, backupRepls)
-	log.Println("🔧 Applying backup job manifest...")
-	if err := k8s.ApplyManifest(backupManifest, namespace, clonePVCName, true); err != nil {
+	if err := k8s.ApplyManifest(manifests.BackupJob, namespace, "block-backup-job-"+jobSuffix, backupRepls); err != nil {
 		k8s.CleanupResources(namespace, vsName, clonePVCName, vsCreated, pvcCloneCreated)
 		log.Fatalf("❌ Failed to apply backup job manifest: %v", err)
 	}
 
-	// Launch log streaming to capture backup progress from the "backup" container.
+	// Launch log streaming to capture backup progress.
 	go func() {
-		if err := k8s.StreamJobProgressPercentage("block-backup-job", namespace, "backup", "READ progress:"); err != nil {
+		if err := k8s.StreamJobProgressPercentage("block-backup-job-"+jobSuffix, namespace, "backup", "READ progress:"); err != nil {
 			log.Printf("❌ Error streaming backup progress logs: %v", err)
 		}
 	}()
 
 	log.Println("⌛ Waiting for backup job to complete...")
-	if err := k8s.WaitForJob("block-backup-job", namespace, 3600*time.Second); err != nil {
+	if err := k8s.WaitForJob("block-backup-job-"+jobSuffix, namespace, 3600*time.Second); err != nil {
 		k8s.CleanupResources(namespace, vsName, clonePVCName, vsCreated, pvcCloneCreated)
 		log.Fatalf("❌ Backup job did not complete: %v", err)
 	}
