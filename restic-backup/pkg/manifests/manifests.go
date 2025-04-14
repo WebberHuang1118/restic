@@ -112,7 +112,7 @@ spec:
         imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
         args:
-          - export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}} && export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}} && export RESTIC_REPOSITORY={{RESTIC_REPOSITORY}} && export RESTIC_PASSWORD={{RESTIC_PASSWORD}} && /usr/local/bin/accelerated_io -device /dev/{{PVC_NAME}} -mode=read | restic -q backup --stdin --stdin-filename {{PV_NAME}}
+          - export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}} && export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}} && export RESTIC_REPOSITORY={{RESTIC_REPOSITORY}} && export RESTIC_PASSWORD={{RESTIC_PASSWORD}} && /usr/local/bin/accelerated_io -device /dev/{{PVC_NAME}} -mode=read | restic -q backup --stdin --stdin-filename {{PV_NAME}} --tag=ns={{NAMESPACE}},sn={{SNAPSHOT_NAME}}
         volumeDevices:
         - name: vol1
           devicePath: /dev/{{PVC_NAME}}
@@ -141,7 +141,7 @@ spec:
         imagePullPolicy: IfNotPresent
         command: ["/bin/sh", "-c"]
         args:
-          - export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}} && export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}} && export RESTIC_REPOSITORY={{RESTIC_REPOSITORY}} && export RESTIC_PASSWORD={{RESTIC_PASSWORD}} && restic --verbose=2 dump latest {{PV_NAME}} | /usr/local/bin/accelerated_io -device /dev/{{PVC_NAME}} -mode=write
+          - export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}} && export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}} && export RESTIC_REPOSITORY={{RESTIC_REPOSITORY}} && export RESTIC_PASSWORD={{RESTIC_PASSWORD}} && restic -v=2 dump latest {{PV_NAME}} | /usr/local/bin/accelerated_io -device /dev/{{PVC_NAME}} -mode=write
         volumeDevices:
         - name: vol2
           devicePath: /dev/{{PVC_NAME}}
@@ -149,4 +149,26 @@ spec:
       - name: vol2
         persistentVolumeClaim:
           claimName: {{PVC_NAME}}
+`
+
+// FindJob defines the job to execute "restic snapshots" with tag filtering and JSON output.
+const FindJob = `
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{NAME}}
+  namespace: {{NAMESPACE}}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: find
+        image: webberhuang/restic-accelerated:latest
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - export AWS_ACCESS_KEY_ID={{AWS_ACCESS_KEY_ID}} && export AWS_SECRET_ACCESS_KEY={{AWS_SECRET_ACCESS_KEY}} && export RESTIC_REPOSITORY={{RESTIC_REPOSITORY}} && export RESTIC_PASSWORD={{RESTIC_PASSWORD}} && restic snapshots --tag=ns={{NAMESPACE}},sn={{SNAPSHOT_NAME}} --json
 `

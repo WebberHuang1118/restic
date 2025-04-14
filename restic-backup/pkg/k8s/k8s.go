@@ -348,6 +348,51 @@ func StreamJobProgressPercentage(jobName, namespace, container, progressLabel st
 	return nil
 }
 
+// GetJobLogs retrieves complete logs (non-streaming) from the first pod of the given job and container.
+func GetJobLogs(jobName, namespace, container string) (string, error) {
+	var podName string
+	const retryCount = 50
+	for i := 0; i < retryCount; i++ {
+		labelSelector := fmt.Sprintf("job-name=%s", jobName)
+		podList, err := Clientset.CoreV1().Pods(namespace).List(context.TODO(), metav1.ListOptions{
+			LabelSelector: labelSelector,
+		})
+		if err != nil {
+			return "", fmt.Errorf("error listing pods for job %s: %w", jobName, err)
+		}
+		for _, pod := range podList.Items {
+			for _, cs := range pod.Status.ContainerStatuses {
+				// Check if the container is running or has already terminated successfully.
+				if cs.Name == container && (cs.State.Running != nil || cs.State.Terminated != nil) {
+					podName = pod.Name
+					break
+				}
+			}
+			if podName != "" {
+				break
+			}
+		}
+		if podName != "" {
+			break
+		}
+		time.Sleep(6 * time.Second)
+	}
+	if podName == "" {
+		return "", fmt.Errorf("no running pod for job %s with container %s after multiple retries", jobName, container)
+	}
+
+	opts := &corev1.PodLogOptions{
+		Container: container,
+		Follow:    false,
+	}
+	req := Clientset.CoreV1().Pods(namespace).GetLogs(podName, opts)
+	logsBytes, err := req.Do(context.TODO()).Raw()
+	if err != nil {
+		return "", fmt.Errorf("error retrieving logs from pod %s: %w", podName, err)
+	}
+	return string(logsBytes), nil
+}
+
 // GenerateJobSuffix generates a random hexadecimal string to use as a unique job suffix.
 func GenerateJobSuffix() (string, error) {
 	bytes := make([]byte, 4) // Adjust the length as needed.

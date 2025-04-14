@@ -9,10 +9,7 @@ import (
 )
 
 // RunRestore executes the restore workflow.
-func RunRestore(namespace, destPVC, sourcePV, awsID, awsSecret, repository, password string, repoInitialized bool) {
-	if !repoInitialized {
-		log.Fatal("❌ Restic repository is not initialized. Cannot perform restore.")
-	}
+func RunRestore(namespace, destPVC, sourcePV, awsID, awsSecret, repository, password string) {
 	jobSuffix, err := k8s.GenerateJobSuffix()
 	if err != nil {
 		log.Fatalf("❌ Failed to generate job suffix for restore job: %v", err)
